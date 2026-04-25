@@ -1289,3 +1289,15 @@ DEF_HELPER_4(vsm4r_vs, void, ptr, ptr, env, i32)
 #ifndef CONFIG_USER_ONLY
 DEF_HELPER_1(ssamoswap_disabled, void, env)
 #endif
+
+/* Xg233ai custom instructions */
+DEF_HELPER_FLAGS_4(vrelu, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_vadd, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_vscale, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_vmax, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_sort, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_crush, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_expand, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_vdot, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_gemm, TCG_CALL_NO_RWG, void, env, i64, i64, i64)
+DEF_HELPER_FLAGS_4(xg233_dma, TCG_CALL_NO_RWG, void, env, i64, i64, i64)

@@ -1,0 +1,51 @@
+#
+# Translation routines for the instructions of the Xg233ai ISA extensions
+#
+# Xg233ai: Custom instructions for G233 AI accelerator
+#
+# opcode: 0x7B (custom-3) = 1111011
+# funct3: 110
+
+# Fields
+%rd        7:5
+%rs1      15:5
+%rs2      20:5
+%funct7   25:7
+
+# Argument sets
+&r         rd rs1 rs2           !extern
+
+# Formats
+# R-type: funct7(31-25) rs2(24-20) rs1(19-15) funct3(14-12) rd(11-7) opcode(6-0)
+#         .......   ..... ..... ... ..... ....... = 7+5+5+3+5+7 = 32 bits
+@r         .......   ..... ..... ... ..... ....... &r %rs2 %rs1 %rd
+
+# vrelu: funct7 = 1010110 (86 decimal)
+vrelu     1010110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# vadd: funct7 = 0011110 (30 decimal)
+vadd     0011110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# vscale: funct7 = 1100110 (102 decimal)
+vscale   1100110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# vmax: funct7 = 1110110 (118 decimal)
+vmax     1110110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# sort: funct7 = 0010110 (22 decimal)
+sort     0010110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# crush: funct7 = 0100110 (38 decimal)
+crush    0100110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# expand: funct7 = 110110 (54 decimal)
+expand   0110110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# vdot: funct7 = 1000110 (70 decimal)
+vdot     1000110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# gemm: funct7 = 0001110 (14 decimal)
+gemm     0001110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
+
+# dma: funct7 = 0000110 (6 decimal)
+dma     0000110 ..... ..... 110 ..... 1111011  &r %rs2 %rs1 %rd
