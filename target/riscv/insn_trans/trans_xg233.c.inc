@@ -36,7 +36,9 @@ static bool trans_vscale(DisasContext *ctx, arg_r *a)
 static bool trans_vmax(DisasContext *ctx, arg_r *a)
 {
     REQUIRE_XG233(ctx);
-    gen_helper_xg233_vmax(tcg_env, cpu_gpr[a->rd], cpu_gpr[a->rs1], cpu_gpr[a->rs2]);
+    TCGv_i64 ret = tcg_temp_new_i64();
+    gen_helper_xg233_vmax(ret, tcg_env, cpu_gpr[a->rs1], cpu_gpr[a->rs2]);
+    tcg_gen_mov_i64(cpu_gpr[a->rd], ret);
     return true;
 }
 
@@ -64,7 +66,9 @@ static bool trans_expand(DisasContext *ctx, arg_r *a)
 static bool trans_vdot(DisasContext *ctx, arg_r *a)
 {
     REQUIRE_XG233(ctx);
-    gen_helper_xg233_vdot(tcg_env, cpu_gpr[a->rd], cpu_gpr[a->rs1], cpu_gpr[a->rs2]);
+    TCGv_i64 ret = tcg_temp_new_i64();
+    gen_helper_xg233_vdot(ret, tcg_env, cpu_gpr[a->rs1], cpu_gpr[a->rs2]);
+    tcg_gen_mov_i64(cpu_gpr[a->rd], ret);
     return true;
 }
 

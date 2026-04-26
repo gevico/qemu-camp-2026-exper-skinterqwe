@@ -73,8 +73,7 @@ void HELPER(xg233_vscale)(CPURISCVState *env, target_ulong dst,
     }
 }
 
-void HELPER(xg233_vmax)(CPURISCVState *env, target_ulong dst,
-                      target_ulong src, target_ulong n)
+int64_t HELPER(xg233_vmax)(CPURISCVState *env, target_ulong src, target_ulong n)
 {
     uintptr_t ra = GETPC();
     CPUState *cs = env_cpu(env);
@@ -88,7 +87,7 @@ void HELPER(xg233_vmax)(CPURISCVState *env, target_ulong dst,
             max_val = val;
         }
     }
-    cpu_stl_mmu(env, dst, (int64_t)(int32_t)max_val, oi, ra);
+    return (int64_t)(int32_t)max_val;
 }
 
 void HELPER(xg233_sort)(CPURISCVState *env, target_ulong k,
@@ -157,21 +156,21 @@ void HELPER(xg233_expand)(CPURISCVState *env, target_ulong dst,
     }
 }
 
-void HELPER(xg233_vdot)(CPURISCVState *env, target_ulong dst,
-                        target_ulong src1, target_ulong src2)
+int64_t HELPER(xg233_vdot)(CPURISCVState *env, target_ulong src1, target_ulong src2)
 {
     uintptr_t ra = GETPC();
     CPUState *cs = env_cpu(env);
     int mmu_idx = cpu_mmu_index(cs, false);
+    MemOpIdx oi = make_memop_idx(MO_TESL, mmu_idx);
     target_ulong n = 16;
 
     int64_t acc = 0;
     for (target_ulong i = 0; i < n; i++) {
-        int32_t val1 = cpu_ldl_mmu(env, src1 + i * 4, mmu_idx, ra);
-        int32_t val2 = cpu_ldl_mmu(env, src2 + i * 4, mmu_idx, ra);
+        int32_t val1 = cpu_ldl_mmu(env, src1 + i * 4, oi, ra);
+        int32_t val2 = cpu_ldl_mmu(env, src2 + i * 4, oi, ra);
         acc += (int64_t)val1 * (int64_t)val2;
     }
-    cpu_stq_mmu(env, dst, acc, mmu_idx, ra);
+    return acc;
 }
 
 void HELPER(xg233_gemm)(CPURISCVState *env, target_ulong dst,
