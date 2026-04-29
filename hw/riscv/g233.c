@@ -44,6 +44,10 @@
 #include "hw/intc/riscv_aplic.h"
 #include "hw/intc/sifive_plic.h"
 #include "hw/misc/sifive_test.h"
+#include "hw/gpio/g233_gpio.h"
+#include "hw/timer/g233_pwm.h"
+#include "hw/watchdog/g233_wdt.h"
+#include "hw/ssi/g233_spi.h"
 #include "hw/core/platform-bus.h"
 #include "chardev/char.h"
 #include "system/device_tree.h"
@@ -95,6 +99,10 @@ static const MemMapEntry virt_memmap[] = {
     [VIRT_APLIC_S] =      {  0xd000000, APLIC_SIZE(VIRT_CPUS_MAX) },
     [VIRT_UART0] =        { 0x10000000,         0x100 },
     [VIRT_VIRTIO] =       { 0x10001000,        0x1000 },
+    [VIRT_GPIO] =         { 0x10012000,        0x1000 },
+    [VIRT_PWM] =          { 0x10015000,        0x1000 },
+    [VIRT_WDT] =          { 0x10010000,        0x1000 },
+    [VIRT_SPI] =          { 0x10018000,        0x1000 },
     [VIRT_FW_CFG] =       { 0x10100000,          0x18 },
     [VIRT_FLASH] =        { 0x20000000,     0x4000000 },
     [VIRT_IMSIC_M] =      { 0x24000000, VIRT_IMSIC_MAX_SIZE },
@@ -972,7 +980,7 @@ static void create_fdt_uart(RISCVG233State *s,
                            s->memmap[VIRT_UART0].base);
     qemu_fdt_add_subnode(ms->fdt, name);
     //qemu_fdt_setprop_string(ms->fdt, name, "compatible", "ns16550a");
-    qemu_fdt_setprop_string(ms->fdt, name, "compatible", "pl011");
+    qemu_fdt_setprop_string(ms->fdt, name, "compatible", "ns16550a");
     qemu_fdt_setprop_sized_cells(ms->fdt, name, "reg",
                                  2, s->memmap[VIRT_UART0].base,
                                  2, s->memmap[VIRT_UART0].size);
@@ -1705,15 +1713,28 @@ static void virt_machine_init(MachineState *machine)
 
     create_platform_bus(s, mmio_irqchip);
 
-    // serial_mm_init(system_memory, s->memmap[VIRT_UART0].base,
-    //     0, qdev_get_gpio_in(mmio_irqchip, UART0_IRQ), 399193,
-    //     serial_hd(0), DEVICE_LITTLE_ENDIAN);
-    pl011_create(s->memmap[VIRT_UART0].base,
-                 qdev_get_gpio_in(mmio_irqchip, UART0_IRQ),
-                 serial_hd(0));
+    serial_mm_init(system_memory, s->memmap[VIRT_UART0].base,
+        0, qdev_get_gpio_in(mmio_irqchip, UART0_IRQ), 399193,
+        serial_hd(0), DEVICE_LITTLE_ENDIAN);
 
     sysbus_create_simple("goldfish_rtc", s->memmap[VIRT_RTC].base,
         qdev_get_gpio_in(mmio_irqchip, RTC_IRQ));
+
+    /* GPIO */
+    sysbus_create_simple("g233.gpio", s->memmap[VIRT_GPIO].base,
+                         qdev_get_gpio_in(mmio_irqchip, GPIO_IRQ));
+
+    /* PWM */
+    sysbus_create_simple("g233.pwm", s->memmap[VIRT_PWM].base,
+                         qdev_get_gpio_in(mmio_irqchip, PWM_IRQ));
+
+    /* WDT */
+    sysbus_create_simple("g233.wdt", s->memmap[VIRT_WDT].base,
+                         qdev_get_gpio_in(mmio_irqchip, WDT_IRQ));
+
+    /* SPI */
+    sysbus_create_simple("g233.spi", s->memmap[VIRT_SPI].base,
+                         qdev_get_gpio_in(mmio_irqchip, SPI_IRQ));
 
     for (i = 0; i < ARRAY_SIZE(s->flash); i++) {
         /* Map legacy -drive if=pflash to machine properties */
