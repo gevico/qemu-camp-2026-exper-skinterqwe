@@ -1,6 +1,5 @@
 /GNUmakefile
 /build/
-/.gitdocs_build/
 /.cache/
 /.vscode/
 /tests/gevico/firmware/gpgpu/build/
