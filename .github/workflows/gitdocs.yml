@@ -1,0 +1,60 @@
+name: Deploy GitDocs
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/gitdocs.yml'
+      - '.gitdocs.js'
+      - 'docs/gpgpu-experiment/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build GitDocs
+    runs-on: ubuntu-24.04
+    env:
+      NODE_OPTIONS: --openssl-legacy-provider
+      GITDOCS_BASE_URL: /${{ github.event.repository.name }}/
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Build static documentation
+        run: |
+          npx --yes gitdocs@2.0.0 build --config .gitdocs.js
+          touch .gitdocs_build/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitDocs artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .gitdocs_build
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitDocs
+        id: deployment
+        uses: actions/deploy-pages@v4
