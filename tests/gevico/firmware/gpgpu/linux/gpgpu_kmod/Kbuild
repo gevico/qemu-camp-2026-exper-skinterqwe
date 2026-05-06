@@ -1,0 +1,6 @@
+obj-m := gpgpu.o
+gpgpu-objs := gpgpu_module.o gpgpu_pci.o gpgpu_char.o
+
+ccflags-y += -I$(src)
+ccflags-y += -I$(src)/../libgpgpu
+ccflags-y += -I$(src)/../../common

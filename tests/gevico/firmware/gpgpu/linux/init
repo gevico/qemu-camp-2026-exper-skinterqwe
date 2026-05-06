@@ -1,0 +1,14 @@
+#!/bin/sh
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+echo "Loading GPGPU driver..."
+insmod /lib/modules/gpgpu.ko
+
+echo "Running GPGPU demo..."
+/bin/gpgpu_demo
+
+echo "=== Done. Dropping to shell ==="
+exec /bin/sh
