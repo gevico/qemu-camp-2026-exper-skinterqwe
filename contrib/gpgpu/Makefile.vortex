@@ -1,0 +1,59 @@
+# Build the QEMU <-> Vortex simx shim.
+#
+# Usage:
+#   make -f contrib/gpgpu/Makefile.vortex \
+#        VORTEX_HOME=/home/yiyed/project/vortex \
+#        OUT=/tmp/libqemu-vortex-simx.so
+
+VORTEX_HOME ?= /home/yiyed/project/vortex
+OUT ?= $(CURDIR)/libqemu-vortex-simx.so
+
+VORTEX_DESTDIR ?= $(VORTEX_HOME)/runtime
+
+CXX ?= c++
+XLEN ?= 32
+
+ROOT_DIR := $(VORTEX_HOME)
+INC_DIR := $(VORTEX_HOME)/runtime/include
+RT_COMMON_DIR := $(VORTEX_HOME)/runtime/common
+SW_COMMON_DIR := $(VORTEX_HOME)/sim/common
+SIM_DIR := $(VORTEX_HOME)/sim
+
+-include $(VORTEX_HOME)/config.mk
+
+ifeq ($(wildcard $(VORTEX_HOME)/config.mk),)
+$(error Run 'cd $(VORTEX_HOME) && ./configure' before building this shim)
+endif
+
+CXXFLAGS += -std=c++17 -Wall -Wextra -fPIC -O2 -DNDEBUG
+CXXFLAGS += -DXLEN_$(XLEN)
+CXXFLAGS += $(CONFIGS)
+CXXFLAGS += -I.
+CXXFLAGS += -I$(VORTEX_HOME)
+CXXFLAGS += -I$(INC_DIR)
+CXXFLAGS += -I$(RT_COMMON_DIR)
+CXXFLAGS += -I$(VORTEX_HOME)/hw
+CXXFLAGS += -I$(VORTEX_HOME)/runtime
+CXXFLAGS += -I$(VORTEX_HOME)/sim/simx
+CXXFLAGS += -I$(SW_COMMON_DIR)
+CXXFLAGS += -I$(VORTEX_HOME)/third_party/ramulator/ext/spdlog/include
+CXXFLAGS += -I$(VORTEX_HOME)/third_party/ramulator/ext/yaml-cpp/include
+CXXFLAGS += -I$(VORTEX_HOME)/third_party/ramulator/src
+
+LDFLAGS += -shared -pthread
+LDFLAGS += -Wl,-rpath,$(VORTEX_DESTDIR) -L$(VORTEX_DESTDIR) -lsimx
+LDFLAGS += -Wl,-rpath,$(VORTEX_HOME)/third_party/ramulator
+LDFLAGS += -L$(VORTEX_HOME)/third_party/ramulator -lramulator
+
+.PHONY: all simx clean
+
+all: simx $(OUT)
+
+simx:
+	DESTDIR=$(VORTEX_DESTDIR) $(MAKE) -C $(VORTEX_HOME)/sim/simx $(VORTEX_DESTDIR)/libsimx.so
+
+$(OUT): contrib/gpgpu/vortex_qemu_simx.cpp hw/gpgpu/gpgpu_vortex_abi.h
+	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o $@
+
+clean:
+	rm -f $(OUT)

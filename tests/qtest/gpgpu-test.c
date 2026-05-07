@@ -73,12 +73,15 @@
 /* 内核地址寄存器 */
 #define GPGPU_REG_KERNEL_ADDR_LO    0x0300
 #define GPGPU_REG_KERNEL_ADDR_HI    0x0304
+#define GPGPU_REG_KERNEL_ARGS_LO    0x0308
+#define GPGPU_REG_KERNEL_ARGS_HI    0x030C
 #define GPGPU_REG_DISPATCH          0x0330
 
 /* 寄存器位定义 */
 #define GPGPU_CTRL_ENABLE           (1 << 0)
 #define GPGPU_CTRL_RESET            (1 << 1)
 #define GPGPU_STATUS_READY          (1 << 0)
+#define GPGPU_ERR_KERNEL_FAULT      (1 << 1)
 #define GPGPU_DMA_START             (1 << 0)
 #define GPGPU_DMA_DIR_TO_VRAM       (0 << 1)
 #define GPGPU_DMA_DIR_FROM_VRAM     (1 << 1)
@@ -921,7 +924,7 @@ static const uint32_t lp_convert_saturate_kernel[] = {
 };
 
 static void gpgpu_test_lp_convert_saturate(void *obj, void *data,
-                                            QGuestAllocator *alloc)
+                                           QGuestAllocator *alloc)
 {
     QGPGPU *gpgpu = obj;
     QPCIDevice *pdev = &gpgpu->dev;
@@ -969,11 +972,168 @@ static void gpgpu_test_lp_convert_saturate(void *obj, void *data,
     qpci_iounmap(pdev, bar2);
 }
 
+static uint64_t load_le64(const uint8_t *p)
+{
+    uint64_t value = 0;
+
+    for (int i = 7; i >= 0; i--) {
+        value = (value << 8) | p[i];
+    }
+
+    return value;
+}
+
+static void gpgpu_vram_write_bytes(QPCIDevice *pdev, QPCIBar bar,
+                                   uint64_t offset, const void *buf,
+                                   size_t size)
+{
+    const uint8_t *bytes = buf;
+
+    for (size_t i = 0; i < size; i++) {
+        qpci_io_writeb(pdev, bar, offset + i, bytes[i]);
+    }
+}
+
+static void gpgpu_vram_write_u32(QPCIDevice *pdev, QPCIBar bar,
+                                 uint64_t offset, uint32_t value)
+{
+    qpci_io_writel(pdev, bar, offset, value);
+}
+
+static void gpgpu_vram_write_u64(QPCIDevice *pdev, QPCIBar bar,
+                                 uint64_t offset, uint64_t value)
+{
+    qpci_io_writel(pdev, bar, offset, (uint32_t)value);
+    qpci_io_writel(pdev, bar, offset + 4, (uint32_t)(value >> 32));
+}
+
+static float gpgpu_vram_read_float(QPCIDevice *pdev, QPCIBar bar,
+                                   uint64_t offset)
+{
+    union {
+        uint32_t u32;
+        float f32;
+    } value;
+
+    value.u32 = qpci_io_readl(pdev, bar, offset);
+    return value.f32;
+}
+
+static void gpgpu_test_vortex_sgemm_n4(void *obj, void *data,
+                                       QGuestAllocator *alloc)
+{
+    static const uint64_t vram_base = 0x80000000ULL;
+    static const uint64_t a_off = 0x10000;
+    static const uint64_t b_off = 0x10100;
+    static const uint64_t c_off = 0x10200;
+    static const uint64_t args_off = 0x10300;
+    enum {
+        size = 4,
+    };
+    QGPGPU *gpgpu = obj;
+    QPCIDevice *pdev = &gpgpu->dev;
+    QPCIBar bar0, bar2;
+    const char *vxbin_path = data;
+    g_autofree gchar *contents = NULL;
+    gsize vxbin_size = 0;
+    const uint8_t *vxbin;
+    uint64_t min_vma, max_vma, runtime_size, payload_size, kernel_off;
+    float a[size * size], b[size * size], expected[size * size];
+    uint32_t status, error;
+    GError *err = NULL;
+
+    g_assert_nonnull(vxbin_path);
+    g_assert_true(g_file_get_contents(vxbin_path, &contents, &vxbin_size,
+                                      &err));
+    g_assert_no_error(err);
+    g_assert_cmpuint(vxbin_size, >, 16);
+
+    vxbin = (const uint8_t *)contents;
+    min_vma = load_le64(vxbin);
+    max_vma = load_le64(vxbin + 8);
+    payload_size = vxbin_size - 16;
+    runtime_size = max_vma - min_vma;
+    g_assert_cmphex(min_vma, >=, vram_base);
+    g_assert_cmpuint(runtime_size, >=, payload_size);
+    kernel_off = min_vma - vram_base;
+
+    for (uint32_t i = 0; i < size * size; i++) {
+        a[i] = (float)(i + 1) * 0.25f;
+        b[i] = (float)((i % size) + 1) * 0.5f;
+    }
+
+    for (uint32_t row = 0; row < size; row++) {
+        for (uint32_t col = 0; col < size; col++) {
+            float sum = 0.0f;
+
+            for (uint32_t e = 0; e < size; e++) {
+                sum += a[row * size + e] * b[e * size + col];
+            }
+            expected[row * size + col] = sum;
+        }
+    }
+
+    qpci_device_enable(pdev);
+    bar0 = qpci_iomap(pdev, 0, NULL);
+    bar2 = qpci_iomap(pdev, 2, NULL);
+
+    gpgpu_vram_write_bytes(pdev, bar2, kernel_off, vxbin + 16, payload_size);
+    for (uint64_t off = payload_size; off < runtime_size; off++) {
+        qpci_io_writeb(pdev, bar2, kernel_off + off, 0);
+    }
+
+    gpgpu_vram_write_bytes(pdev, bar2, a_off, a, sizeof(a));
+    gpgpu_vram_write_bytes(pdev, bar2, b_off, b, sizeof(b));
+    for (uint32_t i = 0; i < size * size; i++) {
+        qpci_io_writel(pdev, bar2, c_off + i * 4, 0);
+    }
+
+    gpgpu_vram_write_u32(pdev, bar2, args_off, size);
+    gpgpu_vram_write_u32(pdev, bar2, args_off + 4, size);
+    gpgpu_vram_write_u32(pdev, bar2, args_off + 8, size);
+    gpgpu_vram_write_u32(pdev, bar2, args_off + 12, 0);
+    gpgpu_vram_write_u64(pdev, bar2, args_off + 16, vram_base + a_off);
+    gpgpu_vram_write_u64(pdev, bar2, args_off + 24, vram_base + b_off);
+    gpgpu_vram_write_u64(pdev, bar2, args_off + 32, vram_base + c_off);
+
+    qpci_io_writel(pdev, bar0, GPGPU_REG_GLOBAL_CTRL, GPGPU_CTRL_ENABLE);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_KERNEL_ADDR_LO, (uint32_t)min_vma);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_KERNEL_ADDR_HI,
+                   (uint32_t)(min_vma >> 32));
+    qpci_io_writel(pdev, bar0, GPGPU_REG_KERNEL_ARGS_LO,
+                   (uint32_t)(vram_base + args_off));
+    qpci_io_writel(pdev, bar0, GPGPU_REG_KERNEL_ARGS_HI,
+                   (uint32_t)((vram_base + args_off) >> 32));
+    qpci_io_writel(pdev, bar0, GPGPU_REG_GRID_DIM_X, size);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_GRID_DIM_Y, size);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_GRID_DIM_Z, 1);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_BLOCK_DIM_X, 1);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_BLOCK_DIM_Y, 1);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_BLOCK_DIM_Z, 1);
+    qpci_io_writel(pdev, bar0, GPGPU_REG_DISPATCH, 1);
+
+    status = qpci_io_readl(pdev, bar0, GPGPU_REG_GLOBAL_STATUS);
+    error = qpci_io_readl(pdev, bar0, GPGPU_REG_ERROR_STATUS);
+    g_assert_cmpuint(status & GPGPU_STATUS_READY, ==, GPGPU_STATUS_READY);
+    g_assert_cmpuint(error & GPGPU_ERR_KERNEL_FAULT, ==, 0);
+
+    for (uint32_t i = 0; i < size * size; i++) {
+        float actual = gpgpu_vram_read_float(pdev, bar2, c_off + i * 4);
+
+        g_assert_cmpfloat_with_epsilon(actual, expected[i], 0.0001f);
+    }
+
+    qpci_iounmap(pdev, bar0);
+    qpci_iounmap(pdev, bar2);
+}
+
 static void gpgpu_register_nodes(void)
 {
     QOSGraphEdgeOptions opts = {
         .extra_device_opts = "addr=04.0",
     };
+    const char *vortex_lib = g_getenv("GPGPU_QTEST_VORTEX_LIB");
+    const char *vortex_sgemm = g_getenv("GPGPU_QTEST_VORTEX_SGEMM_VXBIN");
 
     add_qpci_address(&opts, &(QPCIAddress) {
         .devfn = QPCI_DEVFN(4, 0),
@@ -1010,6 +1170,38 @@ static void gpgpu_register_nodes(void)
                  gpgpu_test_lp_convert_e5m2_e2m1, NULL);
     qos_add_test("lp-convert-saturate", "gpgpu",
                  gpgpu_test_lp_convert_saturate, NULL);
+
+    if (vortex_lib && vortex_lib[0]) {
+        g_autofree char *vortex_opts = g_strdup_printf(
+            "addr=04.0,backend=vortex,vortex-lib=%s,vortex-vram-base=0x80000000",
+            vortex_lib);
+        QOSGraphEdgeOptions vortex_edge = {
+            .extra_device_opts = vortex_opts,
+        };
+
+        add_qpci_address(&vortex_edge, &(QPCIAddress) {
+            .devfn = QPCI_DEVFN(4, 0),
+            .vendor_id = GPGPU_VENDOR_ID,
+            .device_id = GPGPU_DEVICE_ID,
+        });
+
+        /*
+         * Optional smoke coverage for the dynamic Vortex backend.  It only
+         * checks device realization, which is where the simx shim is loaded.
+         */
+        qos_node_create_driver_named("gpgpu-vortex", "gpgpu", gpgpu_create);
+        qos_node_consumes("gpgpu-vortex", "pci-bus", &vortex_edge);
+        qos_node_produces("gpgpu-vortex", "pci-device");
+        qos_add_test("simx-load", "gpgpu-vortex", gpgpu_test_device_id, NULL);
+        if (vortex_sgemm && vortex_sgemm[0]) {
+            QOSGraphTestOptions sgemm_opts = {
+                .arg = (void *)vortex_sgemm,
+            };
+
+            qos_add_test("sgemm-n4", "gpgpu-vortex",
+                         gpgpu_test_vortex_sgemm_n4, &sgemm_opts);
+        }
+    }
 }
 
 libqos_init(gpgpu_register_nodes);

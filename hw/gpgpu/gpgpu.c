@@ -12,6 +12,7 @@
 #include "qemu/units.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
+#include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/msi.h"
@@ -21,6 +22,53 @@
 
 #include "gpgpu.h"
 #include "gpgpu_core.h"
+#include "gpgpu_vortex.h"
+
+static bool gpgpu_backend_is(const GPGPUState *s, const char *name)
+{
+    const char *backend = s->backend ?: "cmodel";
+
+    return g_str_equal(backend, name);
+}
+
+static bool gpgpu_backend_init(GPGPUState *s, Error **errp)
+{
+    const char *backend = s->backend ?: "cmodel";
+    Error *local_err = NULL;
+
+    if (g_str_equal(backend, "cmodel")) {
+        return true;
+    }
+
+    if (g_str_equal(backend, "vortex")) {
+        return gpgpu_vortex_init(s, errp);
+    }
+
+    if (g_str_equal(backend, "auto")) {
+        if (!s->vortex_lib && !g_getenv("GPGPU_VORTEX_SIMX_LIB")) {
+            return true;
+        }
+        if (!gpgpu_vortex_init(s, &local_err)) {
+            warn_report("GPGPU: Vortex backend unavailable, using cmodel: %s",
+                        error_get_pretty(local_err));
+            error_free(local_err);
+        }
+        return true;
+    }
+
+    error_setg(errp, "GPGPU: unsupported backend '%s' "
+               "(expected cmodel, auto, or vortex)", backend);
+    return false;
+}
+
+static int gpgpu_exec_kernel(GPGPUState *s)
+{
+    if (gpgpu_backend_is(s, "vortex") || s->vortex_backend) {
+        return gpgpu_vortex_exec_kernel(s);
+    }
+
+    return gpgpu_core_exec_kernel(s);
+}
 
 static uint64_t gpgpu_ctrl_read(void *opaque, hwaddr addr, unsigned size)
 {
@@ -211,7 +259,7 @@ static void gpgpu_ctrl_write(void *opaque, hwaddr addr, uint64_t val,
         s->global_status |= GPGPU_STATUS_BUSY;
         s->global_status &= ~GPGPU_STATUS_READY;
         /* Execute kernel synchronously */
-        if (gpgpu_core_exec_kernel(s) < 0) {
+        if (gpgpu_exec_kernel(s) < 0) {
             s->error_status |= GPGPU_ERR_KERNEL_FAULT;
         }
         /* Clear BUSY, set READY */
@@ -437,6 +485,12 @@ static void gpgpu_realize(PCIDevice *pdev, Error **errp)
         return;
     }
 
+    if (!gpgpu_backend_init(s, errp)) {
+        g_free(s->vram_ptr);
+        s->vram_ptr = NULL;
+        return;
+    }
+
     /* BAR 0: control registers */
     memory_region_init_io(&s->ctrl_mmio, OBJECT(s), &gpgpu_ctrl_ops, s,
                           "gpgpu-ctrl", GPGPU_CTRL_BAR_SIZE);
@@ -465,7 +519,9 @@ static void gpgpu_realize(PCIDevice *pdev, Error **errp)
                   &s->ctrl_mmio, 0, 0xFE000,
                   &s->ctrl_mmio, 0, 0xFF000,
                   0, errp)) {
+        gpgpu_vortex_cleanup(s);
         g_free(s->vram_ptr);
+        s->vram_ptr = NULL;
         return;
     }
 
@@ -482,6 +538,7 @@ static void gpgpu_exit(PCIDevice *pdev)
 {
     GPGPUState *s = GPGPU(pdev);
 
+    gpgpu_vortex_cleanup(s);
     timer_free(s->dma_timer);
     timer_free(s->kernel_timer);
     g_free(s->vram_ptr);
@@ -517,6 +574,9 @@ static const Property gpgpu_properties[] = {
                        GPGPU_DEFAULT_WARP_SIZE),
     DEFINE_PROP_UINT64("vram_size", GPGPUState, vram_size,
                        GPGPU_DEFAULT_VRAM_SIZE),
+    DEFINE_PROP_STRING("backend", GPGPUState, backend),
+    DEFINE_PROP_STRING("vortex-lib", GPGPUState, vortex_lib),
+    DEFINE_PROP_UINT64("vortex-vram-base", GPGPUState, vortex_vram_base, 0),
 };
 
 static const VMStateDescription vmstate_gpgpu = {

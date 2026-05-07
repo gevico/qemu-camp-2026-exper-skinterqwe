@@ -253,9 +253,13 @@ struct GPGPUState {
     uint32_t warps_per_cu;          /* 每个 CU 的 warp 数量 */
     uint32_t warp_size;             /* 每个 warp 的线程数 */
     uint64_t vram_size;             /* 显存大小 (字节) */
+    char *backend;                  /* 执行后端: cmodel/auto/vortex */
+    char *vortex_lib;               /* Vortex simx 桥接库路径 */
+    uint64_t vortex_vram_base;      /* BAR2 offset 0 对应的 Vortex 地址 */
 
     /*-- 显存后端存储 --*/
     uint8_t *vram_ptr;              /* 显存数据指针 */
+    void *vortex_backend;           /* Vortex simx 后端私有状态 */
 
     /*-- 全局控制寄存器状态 --*/
     uint32_t global_ctrl;           /* GLOBAL_CTRL 寄存器值 */

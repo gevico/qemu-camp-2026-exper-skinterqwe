@@ -60,8 +60,26 @@
 16. [15. 调试问题与后续改进](15-debugging-and-known-issues.md)
     典型错误、现象、原因、解决方法和后续改进方向。
 
+### Vortex simx 进阶路径
+
+17. [16. Vortex simx 集成总览](16-vortex-simx-overview.md)
+    为什么要把手写 cmodel 替换为 Vortex simx、当前完成的集成边界和端到端执行路径。
+
+18. [17. QEMU 侧后端切换机制](17-qemu-vortex-backend.md)
+    `backend=cmodel/vortex/auto`、动态库加载、dispatch 入口和为什么使用外部 shim。
+
+19. [18. Vortex shim ABI 与内存模型](18-vortex-shim-abi-and-memory.md)
+    C/C++ ABI 桥接、`VortexQEMUDispatch`、BAR2 与 Vortex device address 映射、全量 VRAM 同步。
+
+20. [19. Vortex sgemm 验证流程](19-vortex-sgemm-validation.md)
+    从 Vortex 原生 `kernel.vxbin` 到 QEMU+simx `sgemm-n4` QTest 的完整验证流程。
+
+21. [20. Vortex 集成学习路线与后续改进](20-vortex-learning-roadmap.md)
+    面向初学者的阅读路线、核心概念复盘、常见问题和下一阶段方向。
+
 ## 当前验证结果
 
 - 裸机 demo：`vector_add / relu / matmul` 全部 PASS。
 - Linux demo：`gpgpu.ko` 加载成功，`/dev/gpgpu` 可用，三个 kernel 全部 PASS。
 - Linux QEMU 启动后 demo 结束可正常 poweroff，不再因为 PID 1 退出触发 panic。
+- Vortex simx：原生 `sgemm -n4` PASS，QEMU+Vortex `gpgpu-vortex-tests/sgemm-n4` PASS。
