@@ -71,17 +71,18 @@ vortex_qemu_destroy()
 
 这样 QEMU 主体不需要理解 Vortex 内部 C++ 类布局。
 
-### bring-up shim
+### 零拷贝 shim
 
-当前 shim 是为了先跑通功能，不是最终高性能实现。它的核心策略是：
+当前 shim 已经把 QEMU BAR2 backing memory 按页接入 Vortex `RAM`，它的核心策略是：
 
 ```text
-QEMU VRAM 全量复制到 Vortex RAM
-执行
-Vortex RAM 全量复制回 QEMU VRAM
+QEMU BAR2 page
+  ↓ 映射为
+Vortex RAM page
+  ↓ 被 simx load/store 直接访问
 ```
 
-优点是简单可靠；缺点是性能差，且不是真正的共享内存模型。
+这样可以避免每次 dispatch 前后复制整块 VRAM，同时保留 Vortex simx 内部的 cache、memory coalescer 和执行时序。当前实现仍是 shim 层方案，长期最好在 Vortex 侧提供正式 memory backend 接口。
 
 ## 常见问题
 
@@ -103,14 +104,14 @@ Vortex RAM 全量复制回 QEMU VRAM
 
 ## 后续改进方向
 
-### 1. 零拷贝内存后端
+### 1. 正式 memory backend 接口
 
-当前全量复制 BAR2。后续可以把 QEMU BAR2 backing memory 封装成 Vortex simx 的 memory backend，让 Vortex 直接访问 QEMU VRAM。
+当前已经在 shim 中实现了 BAR2 页级零拷贝映射。后续可以把这件事从 shim hack 提升为 Vortex 正式接口：把 QEMU BAR2 backing memory 封装成 Vortex simx 支持的外部 memory backend，让 Vortex 直接访问 QEMU VRAM。
 
 目标：
 
 ```text
-减少 upload/download
+去掉对 Vortex 私有字段的访问
 保留 cache/memory 行为
 更接近真实设备 DMA 模型
 ```

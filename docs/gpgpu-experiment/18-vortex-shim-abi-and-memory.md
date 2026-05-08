@@ -81,29 +81,31 @@ QEMU BAR2 offset 0x00000  ↔  Vortex address 0x80000000
 QEMU BAR2 offset 0x10300  ↔  Vortex address 0x80010300
 ```
 
-## 当前内存同步方式
+## 当前零拷贝内存方式
 
-当前 shim 是 bring-up 版本，采用全量复制：
+当前 shim 已经从最初的全量复制升级为页级零拷贝映射：
 
 ```text
-dispatch 前:
-  QEMU BAR2 backing memory
-    ↓ upload
-  Vortex RAM[vram_base, vram_base + vram_size)
+QEMU BAR2 backing memory
+  ↓ 按页映射到
+Vortex RAM::pages_[vram_base >> page_bits ...]
 
 Vortex simx 执行 kernel
 
-dispatch 后:
-  Vortex RAM[vram_base, vram_base + vram_size)
-    ↓ download
-  QEMU BAR2 backing memory
+kernel load/store
+  ↓ Vortex cache / memory coalescer / RAM 路径
+QEMU BAR2 backing memory
 ```
 
-这样做性能不是最优，但概念简单，适合第一阶段验证：
+也就是说，QEMU QTest 或 guest 先把 kernel、参数和数据写入 BAR2；dispatch 时 shim 把 Vortex `RAM` 中覆盖这段 device address 的页指针替换为 QEMU BAR2 的 host 指针。kernel 写输出矩阵时，结果直接写入 QEMU VRAM，不需要执行完成后再 download。
 
-- QEMU 不需要暴露复杂内存接口给 Vortex。
-- Vortex simx 仍然使用自己的 RAM、cache 和 memory coalescer。
-- 测试可以直接通过 BAR2 观察 kernel 输出。
+这个实现仍然保留 Vortex simx 的核心执行路径：
+
+- 指令 fetch 和数据 load/store 仍由 Vortex core 发起。
+- cache、memory coalescer 和调度行为仍在 simx 内部生效。
+- 只有最终 RAM backing store 被替换为 QEMU BAR2 memory。
+
+当前版本为了避免修改 Vortex 仓库，在 shim 包含 `runtime/simx/vortex.cpp` 时打开了必要的私有字段访问，从而能更新 `RAM::pages_`。更干净的长期接口应该由 Vortex 正式暴露外部 `MemDevice` 或 memory backend 注入能力。
 
 ## 为什么要设置 mem_reserve
 
@@ -116,7 +118,7 @@ vx_copy_to_dev()
 vx_start()
 ```
 
-QEMU shim 直接操作 Vortex `vx_device`，如果只 upload 数据但不声明这段地址可访问，simx 执行时可能触发内存访问错误。因此 shim 在第一次 dispatch 时会对整段 BAR2 映射执行：
+QEMU shim 直接操作 Vortex `vx_device`，如果只映射 host page 但不声明这段地址可访问，simx 执行时仍可能触发内存访问错误。因此 shim 在第一次 dispatch 时会对整段 BAR2 映射执行：
 
 ```text
 mem_reserve(vram_base, vram_size, VX_MEM_READ_WRITE)
@@ -144,14 +146,20 @@ Error: invalid MPM CLASS: value=8
 
 这类问题很典型：当我们绕过一层 runtime 直接调用更底层 API 时，要补齐 runtime 原本帮我们做的初始化。
 
-## 后续更好的内存模型
+## 和最初全量复制方案的区别
 
-全量复制适合教学和 bring-up，但后续可以改进为：
+最初 bring-up 版本采用：
 
 ```text
-QEMU BAR2 backing memory
-  ↓ 封装为 Vortex MemDevice
-Vortex cache/memory system 直接访问
+dispatch 前: QEMU BAR2 -> Vortex RAM
+dispatch 后: Vortex RAM -> QEMU BAR2
 ```
 
-这会减少拷贝，并能更精确地研究 DMA、cache flush、内存一致性和中断完成时序。
+现在改为：
+
+```text
+dispatch 前: 建立 Vortex RAM page -> QEMU BAR2 page 映射
+dispatch 后: 不需要回拷，结果已经在 QEMU BAR2 中
+```
+
+这减少了整块 VRAM 的 upload/download，更接近真实设备直接访问显存的模型，也为后续研究 DMA、cache flush、内存一致性和异步中断完成时序打下基础。

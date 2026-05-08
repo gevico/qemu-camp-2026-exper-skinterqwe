@@ -64,7 +64,9 @@ make -f contrib/gpgpu/Makefile.vortex \
   OUT=/tmp/libqemu-vortex-simx.so
 ```
 
-该 shim 直接复用 Vortex 的 `runtime/simx/vortex.cpp`，dispatch 时把 QEMU BAR2 内容复制到 Vortex RAM 的 `vram_base`，执行完成后再复制回来。它适合作为第一阶段 bring-up；长期方案应把 QEMU BAR2 封装成 Vortex `MemDevice`，减少全量复制并支持更精确的 DMA/缓存一致性模型。
+该 shim 直接复用 Vortex 的 `runtime/simx/vortex.cpp`，并在 dispatch 时把 Vortex `RAM` 中覆盖 BAR2 地址范围的页映射到 QEMU BAR2 backing memory。这样 Vortex simx 的 load/store 仍经过原有 cache、memory coalescer 和 RAM 访问路径，但最终读写会直接落到 QEMU VRAM 指针上，不再对整块 BAR2 做 dispatch 前 upload 和 dispatch 后 download。
+
+当前实现为了避免修改 Vortex 仓库，shim 在包含 Vortex runtime 实现时打开了必要的私有字段访问，用于替换 `RAM::pages_` 中对应页的 host 指针。长期更干净的方案是在 Vortex 侧提供正式的外部 memory backend 或 `MemDevice` 注入接口。
 
 ## QEMU 侧 smoke test
 
@@ -120,7 +122,7 @@ make -C /home/yiyed/project/vortex/kernel
 
 ## 后续工作
 
-1. 在 Vortex 仓库侧实现 `CoreSim` 包装，把 QEMU 的 VRAM 指针适配为 simx memory backend。
-2. 将 `kernel_pc` 和 `kernel_args` 映射到 Vortex runtime 的 kernel launch 格式，先跑通一个 Vortex 原生裸机 kernel。
-3. 对齐进阶实验一的 `libgpgpu`/驱动 ABI 与 Vortex POCL/OpenCL runtime，最小目标是 `sgemm`。
+1. 在 Vortex 仓库侧提供正式的外部 `MemDevice` / memory backend 注入接口，替代 shim 当前的私有字段访问。
+2. 将 QEMU dispatch 升级为异步执行模型，kernel 完成后由 simx 回调触发 MSI-X。
+3. 对齐进阶实验一的 `libgpgpu`/驱动 ABI 与 Vortex POCL/OpenCL runtime，最小目标是 OpenCL `sgemm`。
 4. 在 ArceOS 和 rCore 中验证 PCI 发现、BAR 映射、MSI-X、中断完成和 VRAM 数据正确性。
